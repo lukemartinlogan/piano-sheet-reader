@@ -1,0 +1,11 @@
+node_modules/
+dist/
+scripts/out/
+*.local
+*.tsbuildinfo
+.DS_Store
+.vite/
+
+# Capacitor native projects (added when the mobile shells are generated)
+/android/
+/ios/

@@ -1,0 +1,331 @@
+:root {
+  --bg: #12141a;
+  --panel: #1b1e26;
+  --panel-2: #232733;
+  --line: #333949;
+  --text: #e8eaf0;
+  --muted: #98a0b3;
+  --accent: #5aa9ff;
+  /* Lines and spaces get distinct colours so the two gutter columns read apart. */
+  --letter-line: #1552a8;
+  --letter-space: #a8590f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.score-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.score-title {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.score-composer {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.transport-play {
+  min-width: 52px;
+  font-size: 15px;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 42px;
+  text-align: right;
+}
+
+.time-total {
+  text-align: left;
+}
+
+.seek {
+  flex: 1 1 220px;
+  min-width: 140px;
+}
+
+input[type='range'] {
+  accent-color: var(--accent);
+  height: 28px;
+}
+
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.readout {
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+select,
+input[type='number'] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: inherit;
+  min-height: 32px;
+}
+
+input[type='number'] {
+  width: 60px;
+}
+
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px 10px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 200px;
+}
+
+.settings legend {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 4px;
+}
+
+/* ---------- banners ---------- */
+
+.banner {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.banner-error {
+  background: #4a1f22;
+  color: #ffd9dc;
+  border-bottom: 1px solid #743034;
+}
+
+.banner button {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  min-height: 0;
+  padding: 2px 6px;
+}
+
+/* ---------- score ---------- */
+
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.score-scroll {
+  height: 100%;
+  overflow: auto;
+  background: #f4f4f2;
+  -webkit-overflow-scrolling: touch;
+}
+
+.score-host {
+  background: #ffffff;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.busy,
+.drop-hint {
+  position: absolute;
+  pointer-events: none;
+}
+
+.busy {
+  right: 14px;
+  bottom: 14px;
+  background: rgba(18, 20, 26, 0.85);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.drop-hint {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 20, 26, 0.6);
+  color: var(--text);
+  font-size: 16px;
+  border: 3px dashed var(--accent);
+}
+
+/* ---------- letter guide (drawn into OSMD's SVG) ---------- */
+
+.gutter-letter {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+}
+
+.gutter-letter-line {
+  fill: var(--letter-line);
+}
+
+.gutter-letter-space {
+  fill: var(--letter-space);
+  font-weight: 600;
+}
+
+/*
+ * Letter printed inside a notehead. Filled white with a dark outline drawn
+ * underneath (paint-order), so it reads on a solid black head and on a hollow
+ * half/whole head alike, whatever colour the head has been tinted.
+ */
+.note-letter {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 700;
+  stroke-width: 0.8;
+  paint-order: stroke;
+  pointer-events: none;
+  /* Colours are set per note in noteLetters.ts, via style so nothing here can
+     override them. A fill declared here would win over a presentation
+     attribute and repaint every letter the same colour. */
+}
+
+/* Row band behind the staff; its fill is set per letter when colour coding is on. */
+.gutter-band {
+  shape-rendering: crispEdges;
+}
+
+/*
+ * Continues the staff into the ledger area so extended rows are not left
+ * floating. Solid, but thinner and lighter than a real staff line so it still
+ * reads as a guide rather than as part of the notation.
+ */
+.gutter-ledger-rule {
+  stroke: #78909c;
+  stroke-width: 0.9;
+  opacity: 0.75;
+}
+
+.measure-highlight {
+  fill: #ffd54a;
+  opacity: 0.22;
+}
+
+@media (max-width: 640px) {
+  .toolbar-row-main .score-composer {
+    display: none;
+  }
+
+  .settings fieldset {
+    flex: 1 1 100%;
+  }
+}
