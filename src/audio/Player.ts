@@ -153,6 +153,12 @@ export class Player {
     return this.midiSink ?? this.synth;
   }
 
+  /** Sound one note immediately, for a key tapped on the keyboard view. */
+  preview(midi: number, duration = 0.7): void {
+    const ctx = this.ensureContext();
+    this.sink?.noteOn(midi, ctx.currentTime, duration, 0.8);
+  }
+
   private tick(): void {
     if (!this.playing || !this.ctx) return;
     const position = this.position;

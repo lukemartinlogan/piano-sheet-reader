@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreView } from './components/ScoreView';
-import { Toolbar } from './components/Toolbar';
+import { PianoRoll } from './components/PianoRoll';
+import { Toolbar, type ViewMode } from './components/Toolbar';
 import { loadMusicXml } from './score/loadMusicXml';
 import { parseScore } from './score/parseScore';
 import type { ParsedScore } from './score/types';
@@ -15,6 +16,7 @@ interface Loaded {
   xml: string;
   score: ParsedScore;
   filename: string;
+  fromMidi: boolean;
 }
 
 export default function App() {
@@ -28,6 +30,9 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
 
   const [gutter, setGutter] = useState<GutterOptions>(DEFAULT_GUTTER);
+  const [view, setView] = useState<ViewMode>('sheet');
+  /** How far ahead the keyboard view shows, in seconds. */
+  const [fallSeconds, setFallSeconds] = useState(4);
   // Larger than OSMD's default: the letter columns need the vertical room.
   const [zoom, setZoom] = useState(1.4);
   const [follow, setFollow] = useState(true);
@@ -59,12 +64,12 @@ export default function App() {
       setBusy(true);
       setError(null);
       try {
-        const { xml, doc } = await loadMusicXml(data, filename);
+        const { xml, doc, fromMidi } = await loadMusicXml(data, filename);
         const score = parseScore(doc);
         player.stop();
         player.load(score.notes, score.totalDuration);
         setMutedStaves([]);
-        setLoaded({ xml, score, filename });
+        setLoaded({ xml, score, filename, fromMidi });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -191,6 +196,11 @@ export default function App() {
         onZoom={setZoom}
         gutter={gutter}
         onGutter={setGutter}
+        view={view}
+        onView={setView}
+        fallSeconds={fallSeconds}
+        onFallSeconds={setFallSeconds}
+        fromMidi={loaded?.fromMidi ?? false}
         follow={follow}
         onFollow={setFollow}
         hideClefs={hideClefs}
@@ -216,19 +226,39 @@ export default function App() {
       )}
 
       <main className="stage">
-        <ScoreView
-          xml={loaded?.xml ?? null}
-          score={loaded?.score ?? null}
-          gutter={gutter}
-          zoom={zoom}
-          currentMeasure={currentMeasure}
-          follow={follow}
-          hideClefs={hideClefs}
-          onError={setError}
-          onRenderStateChange={setBusy}
-        />
-        {busy && <div className="busy">Rendering…</div>}
-        {dragging && <div className="drop-hint">Drop a MusicXML file (.musicxml, .xml, .mxl)</div>}
+        {/*
+          Both views stay mounted. Re-engraving a long score costs seconds, so
+          the sheet is hidden rather than unmounted — and hidden by visibility,
+          which keeps its width valid so it does not re-layout on the way back.
+        */}
+        <div className={`stage-layer${view === 'sheet' ? '' : ' stage-layer-hidden'}`}>
+          <ScoreView
+            xml={loaded?.xml ?? null}
+            score={loaded?.score ?? null}
+            gutter={gutter}
+            zoom={zoom}
+            currentMeasure={currentMeasure}
+            follow={follow}
+            hideClefs={hideClefs}
+            onError={setError}
+            onRenderStateChange={setBusy}
+          />
+        </div>
+        <div className={`stage-layer${view === 'keyboard' ? '' : ' stage-layer-hidden'}`}>
+          <PianoRoll
+            score={loaded?.score ?? null}
+            player={player}
+            active={view === 'keyboard'}
+            colorByLetter={gutter.colorByLetter}
+            showLetters={gutter.lettersInNotes}
+            fallSeconds={fallSeconds}
+            mutedStaves={mutedStaves}
+          />
+        </div>
+        {busy && view === 'sheet' && <div className="busy">Rendering…</div>}
+        {dragging && (
+          <div className="drop-hint">Drop a score (.musicxml, .xml, .mxl) or a MIDI file (.mid)</div>
+        )}
       </main>
     </div>
   );

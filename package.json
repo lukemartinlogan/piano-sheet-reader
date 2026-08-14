@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty",
     "smoke": "tsx scripts/smoke.ts",
+    "midi": "tsx scripts/midi-smoke.ts",
     "verify": "node scripts/verify-render.mjs"
   },
   "dependencies": {

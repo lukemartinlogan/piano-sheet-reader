@@ -2,9 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { GutterMode, GutterOptions } from '../render/letterGutter';
 import type { MidiOutputLike } from '../audio/PianoSynth';
 
+/** Sheet music, or notes falling onto a keyboard. */
+export type ViewMode = 'sheet' | 'keyboard';
+
 export interface ToolbarProps {
   title: string;
   composer: string;
+  /** Set when the score was transcribed from a MIDI file rather than read as MusicXML. */
+  fromMidi: boolean;
   playing: boolean;
   position: number;
   duration: number;
@@ -19,6 +24,10 @@ export interface ToolbarProps {
   onZoom: (zoom: number) => void;
   gutter: GutterOptions;
   onGutter: (gutter: GutterOptions) => void;
+  view: ViewMode;
+  onView: (view: ViewMode) => void;
+  fallSeconds: number;
+  onFallSeconds: (seconds: number) => void;
   follow: boolean;
   onFollow: (follow: boolean) => void;
   hideClefs: boolean;
@@ -72,9 +81,33 @@ export function Toolbar(props: ToolbarProps) {
         <div className="score-meta">
           <span className="score-title">{props.title || 'No score loaded'}</span>
           {props.composer && <span className="score-composer">{props.composer}</span>}
+          {props.fromMidi && (
+            <span className="score-source" title="Transcribed from a MIDI file">
+              from MIDI
+            </span>
+          )}
         </div>
 
         <div className="toolbar-actions">
+          {/* The two views are alternatives, so they read as one control. */}
+          <div className="view-switch" role="group" aria-label="View">
+            <button
+              type="button"
+              className={props.view === 'sheet' ? 'active' : ''}
+              aria-pressed={props.view === 'sheet'}
+              onClick={() => props.onView('sheet')}
+            >
+              Sheet
+            </button>
+            <button
+              type="button"
+              className={props.view === 'keyboard' ? 'active' : ''}
+              aria-pressed={props.view === 'keyboard'}
+              onClick={() => props.onView('keyboard')}
+            >
+              Keyboard
+            </button>
+          </div>
           <button type="button" onClick={() => fileInputRef.current?.click()}>
             Open file
           </button>
@@ -92,7 +125,7 @@ export function Toolbar(props: ToolbarProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xml,.musicxml,.mxl"
+            accept=".xml,.musicxml,.mxl,.mid,.midi"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -246,6 +279,25 @@ export function Toolbar(props: ToolbarProps) {
               />
               Hide clefs
             </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Keyboard view</legend>
+            {/* Colour coding and letters are shared with the sheet, so a colour
+                still means the same note in both views. */}
+            <label className="inline-field">
+              Look ahead
+              <input
+                type="range"
+                min={1.5}
+                max={10}
+                step={0.5}
+                value={props.fallSeconds}
+                onChange={(event) => props.onFallSeconds(parseFloat(event.target.value))}
+              />
+              <span className="readout">{props.fallSeconds.toFixed(1)}s</span>
+            </label>
+            <p className="hint">Scroll the roll to scrub; tap a key to hear it.</p>
           </fieldset>
 
           <fieldset>

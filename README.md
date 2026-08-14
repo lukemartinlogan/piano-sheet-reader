@@ -68,10 +68,31 @@ npm run dev        # http://localhost:5173
 ```
 
 The bundled example (`public/examples/`) loads on start. Drag any
-`.musicxml`, `.xml`, or `.mxl` file onto the window to open it.
+`.musicxml`, `.xml`, `.mxl`, or `.mid` file onto the window to open it. The
+format is read from the file's own bytes, so a mislabelled file still opens.
+
+## Two views
+
+**Sheet** is the engraved score described above. **Keyboard** is the same piece
+as notes falling onto a piano, striking the keys in time — the reading aid for
+when you want to find the note under your hand rather than name it on the page.
+The two share a score and a transport, so switching mid-playback keeps your
+place, and colour coding means the same thing in both: a red bar lands on a red
+`C`. The keyboard is drawn to the pitch range the piece actually uses, rounded
+out to whole octaves, so a two-octave piece does not get 88 keys too narrow to
+aim at. Scroll the roll to scrub, tap a key to hear it.
+
+Switching views does not re-engrave: the sheet is hidden rather than unmounted,
+and hidden by `visibility` so it keeps its width. Hiding with `display: none`
+zeroes the container width, and the resize observer then re-lays-out the whole
+score on the way back.
 
 ## Features
 
+- **MIDI import**: open a `.mid` and it is transcribed to notation — quantised,
+  split into two hands, spelled to the key, and beamed. See the limits below.
+- **Keyboard view** with falling notes and live key highlighting, toggled in the
+  toolbar.
 - **Letters inside noteheads** (default), plus an optional **margin letter guide**
   at every barline or once per line. Each is independently toggleable, along with
   colour coding, row highlighting, and octave numbers.
@@ -94,14 +115,36 @@ The bundled example (`public/examples/`) loads on start. Drag any
 ```
 src/
   score/     MusicXML -> timed note list + per-measure clef map
+             midiFile.ts      Standard MIDI File -> notes and meta events
+             midiToMusicXml.ts  performance -> notation (see below)
   render/    geometry read out of OSMD, letter guide, measure highlight
+             keyboard.ts      piano key geometry, shared by roll and keys
   audio/     Web Audio piano voice, MIDI-out sink, transport/scheduler
-  components/  ScoreView (OSMD host) and Toolbar
+  components/  ScoreView (OSMD host), PianoRoll (canvas), Toolbar
 src/render/noteLetters.ts draws the in-notehead letters
 scripts/
   smoke.ts          parse a score in Node and print/validate the result
+  midi-smoke.ts     build a .mid in memory, import it, assert the score
   verify-render.mjs browser check that the guide aligns with the staff
 ```
+
+MIDI import produces MusicXML and hands it to the same loader a dropped
+`.musicxml` goes through, so the renderer, the letter guide and the parser stay
+unaware that MIDI exists. That is the whole reason it is a converter rather than
+a second parser: there is one notation path, and it is the tested one.
+
+A MIDI file records *when keys went down*; a score records *what was written*.
+Everything between is a guess, and `midiToMusicXml.ts` is where the guessing is
+kept — quantising onto a metrical grid, splitting one stream into two hands,
+spelling a pitch class as a letter plus an accidental, and cutting held notes
+into printable values joined by ties. A file that already separates the hands
+(two tracks, or two channels) is taken at its word; anything else is split at
+middle C. When the file names no key, one is inferred from a duration-weighted
+pitch histogram, which is what keeps a flat key from printing as sharps.
+
+The keyboard view is a canvas, redrawn from `player.position` on each animation
+frame rather than from React state — the transport's own clock is the only thing
+accurate enough to put a note on a key at the moment it sounds.
 
 Rendering is [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org/); the
 letter guide is drawn into OSMD's SVG using positions read from its graphic
@@ -118,9 +161,21 @@ the MusicXML directly, which keeps timing under our control.
 ```bash
 npm run typecheck
 npm run smoke                       # parser, against the bundled example
+npm run midi                        # MIDI import, against a built-in fixture
 npm run build && npm run preview    # then, in another shell:
 npm run verify                      # needs Microsoft Edge or Chrome installed
 ```
+
+`midi` writes a Standard MIDI File byte by byte, imports it, and asserts the
+score that comes out: the fixture is hand-written rather than sampled so the
+expected answer is known exactly. It checks the things import is most likely to
+get wrong — the split into two hands, bar lengths across a metre change, tempo
+changes landing on the right beat, a whole note surviving as one note rather
+than four tied quarters, F sharp spelled as F rather than G flat (and carrying
+no accidental, since it is in the key), eighth runs beamed rather than flagged,
+and **every bar filled to exactly its own length on every staff** — a short bar
+is the one error that breaks OSMD's layout rather than merely looking wrong.
+It leaves the fixture and the generated notation in `scripts/out/`.
 
 `verify` loads the built app in a real browser and asserts that:
 
@@ -140,9 +195,39 @@ npm run verify                      # needs Microsoft Edge or Chrome installed
   fills,
 - a colour means the same letter on both staves, with 7 distinct hues,
 - clef changes are tracked and the guide relabels,
-- playback advances, highlights a measure, and pauses.
+- playback advances, highlights a measure, and pauses,
+- the **keyboard view** sizes its canvas, fits the key range to the score, paints
+  more than a flat field (the pixels are read back — a canvas that draws nothing
+  still passes every DOM check), lights keys while playing, sounds a tapped key
+  without moving the transport, and leaves the sheet un-re-engraved on the way
+  back,
+- a **`.mid` dropped into the running app** comes out engraved by OSMD, with
+  every printed letter matching the pitch the parser read — the same
+  cross-check as the first phase, run against notation this app generated
+  rather than notation it was handed.
 
 It writes screenshots to `scripts/out/`.
+
+## Known limitations of MIDI import
+
+A performance is not notation, and these are the places the guess shows. None of
+them affect a `.musicxml` file, which carries the answers.
+
+- **Everything is quantised to sixteenths.** Triplets and swing are rounded onto
+  the binary grid, so a triplet passage comes out as sixteenths. Tuplet notation
+  (`<time-modification>` plus brackets) is the next step, not a tweak.
+- **One voice per staff.** Simultaneous notes become a chord; a note held under a
+  moving line is clipped at the next onset in that hand rather than getting its
+  own voice. The chord takes the length of its longest member, so harmony rings
+  rather than clipping.
+- **A tempo map is preserved but rarely printed.** Every tempo change drives
+  playback, which is what makes quantised notes sound human again; only a sparse,
+  authored-looking map (32 marks or fewer) also gets a printed metronome mark.
+- **Percussion is dropped** — channel 10's "pitches" are drum names.
+- **Everything lands on one grand staff.** A multi-instrument file is merged into
+  two hands rather than becoming one part per instrument.
+- Whole empty bars of lead-in are trimmed, since sequencers add them as a
+  count-off. A genuine pickup bar written as silence goes with them.
 
 ## Known limitations
 

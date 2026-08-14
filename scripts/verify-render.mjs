@@ -188,6 +188,58 @@ const snapshot = () =>
     };
   });
 
+/**
+ * Two bars of C major, right hand over left, as a Standard MIDI File.
+ *
+ * Written out byte by byte so this check needs nothing on disk and nothing from
+ * the import code it is checking. `npm run midi` exercises the converter in
+ * depth; this only has to prove a real .mid survives the trip through the
+ * browser and comes out engraved.
+ */
+function midiFixture() {
+  const varlen = (value) => {
+    const bytes = [value & 0x7f];
+    let rest = value >> 7;
+    while (rest > 0) {
+      bytes.unshift((rest & 0x7f) | 0x80);
+      rest >>= 7;
+    }
+    return bytes;
+  };
+  const u16 = (v) => [(v >> 8) & 0xff, v & 0xff];
+  const u32 = (v) => [(v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff];
+
+  const chunk = (events) => {
+    const body = [];
+    let last = 0;
+    for (const event of [...events].sort((a, b) => a.tick - b.tick || a.order - b.order)) {
+      body.push(...varlen(event.tick - last), ...event.data);
+      last = event.tick;
+    }
+    body.push(0, 0xff, 0x2f, 0);
+    return [0x4d, 0x54, 0x72, 0x6b, ...u32(body.length), ...body];
+  };
+  const meta = (tick, type, bytes) => ({ tick, data: [0xff, type, bytes.length, ...bytes], order: -1 });
+  const note = (channel, midi, tick, length) => [
+    { tick, data: [0x90 | channel, midi, 80], order: 1 },
+    { tick: tick + length, data: [0x80 | channel, midi, 0], order: 0 },
+  ];
+
+  const right = [
+    meta(0, 0x03, [...'Browser check'].map((c) => c.charCodeAt(0))),
+    meta(0, 0x58, [4, 2, 24, 8]),
+    meta(0, 0x51, [0x07, 0xa1, 0x20]),
+    ...[60, 62, 64, 65, 67, 69, 71, 72].flatMap((midi, i) => note(0, midi, i * 480, 480)),
+  ];
+  const left = [...note(1, 48, 0, 1920), ...note(1, 43, 1920, 1920)];
+
+  return new Uint8Array([
+    0x4d, 0x54, 0x68, 0x64, ...u32(6), ...u16(1), ...u16(2), ...u16(480),
+    ...chunk(right),
+    ...chunk(left),
+  ]);
+}
+
 const pass = [];
 const record = (label, value, ok) => {
   console.log(`  ${label.padEnd(26)} ${value}${ok === undefined ? '' : ok ? '  ok' : '  FAILED'}`);
@@ -337,8 +389,114 @@ await page.waitForTimeout(600);
 const stillPaused = await page.evaluate(() => Number(document.querySelector('.seek')?.value ?? 0));
 record('pause holds position', `${paused} -> ${stillPaused}`, paused === stillPaused);
 
+// ---------------------------------------------------------- keyboard view ---
+// The falling-notes view is a canvas, so there is nothing in the DOM to read.
+// It publishes what it drew on the container instead, which is what is checked
+// here: the key range it fitted to the score, and keys lighting up as it plays.
 console.log('');
-console.log('screenshots      scripts/out/{render,with-guide}.png');
+console.log('keyboard view');
+await page.click('button:has-text("Stop"), .toolbar-transport button:nth-of-type(2)').catch(() => {});
+await page.click('.view-switch button:has-text("Keyboard")');
+await page.waitForTimeout(400);
+
+const rollBox = await page.evaluate(() => {
+  const roll = document.querySelector('.piano-roll');
+  const canvas = roll?.querySelector('canvas');
+  if (!roll || !canvas) return null;
+  return {
+    low: Number(roll.dataset.lowKey),
+    high: Number(roll.dataset.highKey),
+    width: canvas.width,
+    height: canvas.height,
+    sheetVisible: getComputedStyle(document.querySelector('.score-scroll').parentElement).visibility,
+  };
+});
+record('canvas sized', rollBox ? `${rollBox.width}x${rollBox.height}` : 'missing',
+  !!rollBox && rollBox.width > 100 && rollBox.height > 100);
+record('key range fitted', rollBox ? `MIDI ${rollBox.low}..${rollBox.high}` : '—',
+  !!rollBox && rollBox.low >= 21 && rollBox.high <= 108 && rollBox.high - rollBox.low >= 24);
+record('sheet kept mounted', rollBox?.sheetVisible, rollBox?.sheetVisible === 'hidden');
+
+// A canvas that paints nothing still passes a DOM check, so compare pixels.
+const blankPixels = await page.evaluate(() => {
+  const canvas = document.querySelector('.piano-roll canvas');
+  const ctx = canvas.getContext('2d');
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const seen = new Set();
+  for (let i = 0; i < data.length; i += 4 * 97) {
+    seen.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+  }
+  return seen.size;
+});
+record('distinct pixel colours', blankPixels, blankPixels > 4);
+
+await page.click('.transport-play');
+let keysSeen = 0;
+for (let i = 0; i < 20 && keysSeen === 0; i++) {
+  await page.waitForTimeout(250);
+  keysSeen = await page.evaluate(() =>
+    Number(document.querySelector('.piano-roll')?.dataset.keysDown ?? 0),
+  );
+}
+record('keys light while playing', keysSeen, keysSeen > 0);
+await page.screenshot({ path: `${outDir}keyboard.png` });
+await page.click('.transport-play');
+
+// Tapping a key has to sound without disturbing the transport.
+const beforeTap = await page.evaluate(() => Number(document.querySelector('.seek')?.value ?? 0));
+const canvasBox = await page.locator('.piano-roll canvas').boundingBox();
+await page.mouse.click(canvasBox.x + canvasBox.width * 0.5, canvasBox.y + canvasBox.height - 20);
+await page.waitForTimeout(150);
+const afterTap = await page.evaluate(() => Number(document.querySelector('.seek')?.value ?? 0));
+record('key tap leaves position', `${beforeTap} -> ${afterTap}`, beforeTap === afterTap);
+
+// Switching back must not re-engrave: the sheet was hidden, not unmounted.
+const rendersBefore = await page.evaluate(() => window.__renders);
+await page.click('.view-switch button:has-text("Sheet")');
+await page.waitForTimeout(600);
+const afterSwitch = await page.evaluate(() => ({
+  renders: window.__renders,
+  letters: document.querySelectorAll('.note-letter').length,
+}));
+record('sheet not re-engraved', `${rendersBefore} -> ${afterSwitch.renders} renders`,
+  afterSwitch.renders === rendersBefore && afterSwitch.letters > 1700);
+
+// ----------------------------------------------------------- midi import ---
+// A .mid has to come out the far side as an engraved score, with every letter
+// matching the pitch the parser read — the same cross-check as phase 1, run
+// against notation this app generated rather than notation it was given.
+console.log('');
+console.log('midi import');
+await page.setInputFiles('input[type=file]', {
+  name: 'browser-check.mid',
+  mimeType: 'audio/midi',
+  buffer: Buffer.from(midiFixture()),
+});
+await page.waitForTimeout(3000);
+
+const midiState = await page.evaluate(() => ({
+  title: document.querySelector('.score-title')?.textContent,
+  badge: document.querySelector('.score-source')?.textContent?.trim() ?? null,
+  banner: document.querySelector('.banner-error')?.textContent ?? null,
+  staves: document.querySelectorAll('g.vf-stave').length,
+}));
+record('opened without error', midiState.banner ?? 'no banner', midiState.banner === null);
+record('title from the file', midiState.title, midiState.title === 'Browser check');
+record('flagged as MIDI', midiState.badge, midiState.badge === 'from MIDI');
+
+const imported = await snapshot();
+record('engraved by OSMD', `${imported.noteheads} noteheads`, imported.noteheads >= 10);
+record('letters drawn', `${imported.noteLetters}/${imported.expectedNotes}`,
+  imported.noteLetters === imported.expectedNotes && imported.expectedNotes === 10);
+record('letters match pitches', `${imported.checkedGroups - imported.mismatchedGroups}/${imported.checkedGroups}`,
+  imported.mismatchedGroups === 0 && imported.checkedGroups > 0);
+for (const m of imported.mismatchSample) console.log(`      ${m.key}  expected ${m.expected}  got ${m.got}`);
+record('both hands engraved', `${imported.expectedGroups} measure-staff groups`,
+  imported.expectedGroups >= 4);
+await page.screenshot({ path: `${outDir}midi-import.png` });
+
+console.log('');
+console.log('screenshots      scripts/out/{render,with-guide,keyboard,midi-import}.png');
 if (problems.length) {
   console.log('\npage errors:');
   for (const p of problems.slice(0, 10)) console.log(`  ${p}`);

@@ -77,9 +77,41 @@ body {
   white-space: nowrap;
 }
 
+.score-source {
+  color: var(--muted);
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .toolbar-actions {
   display: flex;
   gap: 6px;
+}
+
+/* Two views of one score: a single segmented control, not two buttons. */
+.view-switch {
+  display: flex;
+}
+
+.view-switch button {
+  border-radius: 0;
+}
+
+.view-switch button:first-child {
+  border-radius: 7px 0 0 7px;
+}
+
+.view-switch button:last-child {
+  border-radius: 0 7px 7px 0;
+  margin-left: -1px;
+}
+
+.view-switch button.active {
+  background: var(--panel);
+  z-index: 1;
 }
 
 button {
@@ -228,6 +260,21 @@ input[type='number'] {
   min-height: 0;
 }
 
+/*
+ * The sheet and the keyboard are stacked layers, both kept mounted. The hidden
+ * one keeps its box — a display:none sheet would report zero width and force a
+ * full re-engrave every time the view is switched back.
+ */
+.stage-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.stage-layer-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .score-scroll {
   height: 100%;
   overflow: auto;
@@ -265,6 +312,37 @@ input[type='number'] {
   color: var(--text);
   font-size: 16px;
   border: 3px dashed var(--accent);
+}
+
+/* ---------- keyboard view ---------- */
+
+.piano-roll {
+  position: relative;
+  height: 100%;
+  background: #0f1116;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.piano-roll canvas {
+  display: block;
+}
+
+.piano-roll-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 200px;
 }
 
 /* ---------- letter guide (drawn into OSMD's SVG) ---------- */
