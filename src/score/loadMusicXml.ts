@@ -1,34 +1,55 @@
 import JSZip from 'jszip';
 import { isMidiFile } from './midiFile';
 import { midiToMusicXml } from './midiToMusicXml';
+import { isPdfFile } from './pdf/pdfContent';
+import { describeImport, pdfToMusicXml } from './pdf/pdfToMusicXml';
+
+/** Where the notation came from, which is worth telling the reader. */
+export type ScoreSource = 'musicxml' | 'midi' | 'pdf';
 
 export interface LoadedScore {
   /** Raw MusicXML text, ready for both OSMD and our own parser. */
   xml: string;
   doc: Document;
   filename: string;
-  /** True when the MusicXML was derived from a MIDI file rather than read from one. */
-  fromMidi: boolean;
+  source: ScoreSource;
+  /** How well an import went, when that is worth saying out loud. */
+  notice: string | null;
 }
 
 const isZip = (bytes: Uint8Array): boolean =>
   bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && (bytes[2] === 0x03 || bytes[2] === 0x05);
 
 /**
- * Read a .musicxml/.xml file, unwrap a compressed .mxl container, or transcribe
- * a .mid into MusicXML.
+ * Read a score.
+ *
+ * `.musicxml`/`.xml` are read as they are, `.mxl` is unwrapped, and `.mid` and
+ * `.pdf` are transcribed into MusicXML so that everything downstream — the
+ * renderer, the letter guide, the parser — only ever sees one format.
  *
  * The format is taken from the file's own bytes rather than its extension, so a
  * mislabelled file still opens.
  */
 export async function loadMusicXml(data: ArrayBuffer, filename: string): Promise<LoadedScore> {
   const bytes = new Uint8Array(data);
-  const fromMidi = isMidiFile(bytes);
-  const xml = fromMidi
-    ? midiToMusicXml(data, filename)
-    : isZip(bytes)
-      ? await extractMxl(data)
-      : new TextDecoder('utf-8').decode(bytes);
+
+  let source: ScoreSource = 'musicxml';
+  let notice: string | null = null;
+  let xml: string;
+
+  if (isMidiFile(bytes)) {
+    source = 'midi';
+    xml = midiToMusicXml(data, filename);
+  } else if (isPdfFile(bytes)) {
+    source = 'pdf';
+    const result = await pdfToMusicXml(data, filename);
+    xml = result.xml;
+    notice = describeImport(result);
+  } else if (isZip(bytes)) {
+    xml = await extractMxl(data);
+  } else {
+    xml = new TextDecoder('utf-8').decode(bytes);
+  }
 
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   const parseError = doc.querySelector('parsererror');
@@ -39,7 +60,7 @@ export async function loadMusicXml(data: ArrayBuffer, filename: string): Promise
     throw new Error(`${filename} does not look like MusicXML (root element is <${rootTag}>).`);
   }
 
-  return { xml, doc, filename, fromMidi };
+  return { xml, doc, filename, source, notice };
 }
 
 /**

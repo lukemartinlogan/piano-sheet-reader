@@ -241,6 +241,13 @@ input[type='number'] {
   border-bottom: 1px solid #743034;
 }
 
+/* An import that had to guess reports how much of it was verified. */
+.banner-notice {
+  background: #23303f;
+  color: #cfe2f5;
+  border-bottom: 1px solid #35506b;
+}
+
 .banner button {
   margin-left: auto;
   background: transparent;

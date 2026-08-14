@@ -68,8 +68,8 @@ npm run dev        # http://localhost:5173
 ```
 
 The bundled example (`public/examples/`) loads on start. Drag any
-`.musicxml`, `.xml`, `.mxl`, or `.mid` file onto the window to open it. The
-format is read from the file's own bytes, so a mislabelled file still opens.
+`.musicxml`, `.xml`, `.mxl`, `.mid`, or `.pdf` file onto the window to open it.
+The format is read from the file's own bytes, so a mislabelled file still opens.
 
 ## Two views
 
@@ -89,6 +89,8 @@ score on the way back.
 
 ## Features
 
+- **PDF import**: open a PDF exported from notation software and it is read back
+  into a score — pitches exactly, rhythm as far as it can be verified. See below.
 - **MIDI import**: open a `.mid` and it is transcribed to notation — quantised,
   split into two hands, spelled to the key, and beamed. See the limits below.
 - **Keyboard view** with falling notes and live key highlighting, toggled in the
@@ -115,8 +117,11 @@ score on the way back.
 ```
 src/
   score/     MusicXML -> timed note list + per-measure clef map
-             midiFile.ts      Standard MIDI File -> notes and meta events
+             musicXmlWriter.ts  measures + chords -> MusicXML, shared
+             midiFile.ts        Standard MIDI File -> notes and meta events
              midiToMusicXml.ts  performance -> notation (see below)
+             pdf/pdfContent.ts  PDF -> glyphs and paths, in page coordinates
+             pdf/pdfScore.ts    glyphs and paths -> staves, pitches, rhythm
   render/    geometry read out of OSMD, letter guide, measure highlight
              keyboard.ts      piano key geometry, shared by roll and keys
   audio/     Web Audio piano voice, MIDI-out sink, transport/scheduler
@@ -125,13 +130,19 @@ src/render/noteLetters.ts draws the in-notehead letters
 scripts/
   smoke.ts          parse a score in Node and print/validate the result
   midi-smoke.ts     build a .mid in memory, import it, assert the score
+  pdf-smoke.ts      import a real PDF and report how much could be verified
   verify-render.mjs browser check that the guide aligns with the staff
 ```
 
-MIDI import produces MusicXML and hands it to the same loader a dropped
+Both importers produce MusicXML and hand it to the same loader a dropped
 `.musicxml` goes through, so the renderer, the letter guide and the parser stay
-unaware that MIDI exists. That is the whole reason it is a converter rather than
-a second parser: there is one notation path, and it is the tested one.
+unaware that MIDI or PDF exist. That is the whole reason they are converters
+rather than second parsers: there is one notation path, and it is the tested
+one. What they share beyond that — cutting durations into printable note values
+joined by ties, filling gaps with rests, spelling pitches against the key,
+beaming runs within a beat — lives once in `musicXmlWriter.ts`. What each keeps
+is the part that is genuinely its own: recovering notes from a performance, or
+from an engraving.
 
 A MIDI file records *when keys went down*; a score records *what was written*.
 Everything between is a guess, and `midiToMusicXml.ts` is where the guessing is
@@ -145,6 +156,50 @@ pitch histogram, which is what keeps a flat key from printing as sharps.
 The keyboard view is a canvas, redrawn from `player.position` on each animation
 frame rather than from React state — the transport's own clock is the only thing
 accurate enough to put a note on a key at the moment it sounds.
+
+## Reading a PDF
+
+A PDF of sheet music is not a picture of music, it is the music's *drawing*. So
+unlike a MIDI file, **nothing about pitch has to be guessed**: music fonts follow
+SMuFL, where the em square is exactly the height of a five-line staff, so a
+clef's own position and size give the staff geometry, and a notehead sits an
+exact whole number of half staff spaces from it. Measured over a real 7-page
+score, **1710 of 1712 noteheads (99.9%) land exactly on a step**. That property
+is what the whole reader is built on — there is no OCR and no model anywhere in
+it.
+
+`pdfContent.ts` answers "what did this page draw, and where"; `pdfScore.ts`
+answers "what music is that". Staves come from the only long hairline
+horizontals on a page, read off in fives with matching gaps. Systems are staves
+of matching width close enough to be braced. Barlines are the verticals that run
+the system's full height. Noteheads, clefs, accidentals, dots, flags, rests and
+time signatures are glyphs; stems, beams and ledger lines are paths.
+
+Three things about pdf.js cost real time and are worth knowing:
+
+- **Glyph positions have to be computed, not read.** The convenience text API
+  merges a run into one item with one width, and spreading a run's glyphs evenly
+  across it puts every notehead a point or two out — enough that no notehead
+  ever finds its own stem, so every beamed note reads as a quarter. Positions
+  come from the text matrix and each glyph's own advance instead.
+- **Glyphs and paths must share a transform.** Taking text from one API and
+  paths from another leaves them in different frames, and every
+  glyph-against-path test — staff assignment, stem matching, beam counting —
+  silently stops working while pitch still looks perfect. Both are read from the
+  operator list in one pass, then flipped once from PDF's y-up to y-down.
+- **A path holds several sub-paths.** An engraver draws a whole system's
+  barlines as one path object; merging its sub-paths into one bounding box turns
+  five thin verticals into one page-wide blob that matches nothing.
+
+Rhythm is the hard half, and it is where the reader is honest rather than
+confident. Note *values* are recoverable — the notehead's shape, its dots, its
+flags, and the beams crossing its stem — but **onsets are not drawn at all**.
+They follow from durations accumulating from the barline, so every bar is laid
+out and then checked against its own time signature. A bar that adds up is
+almost certainly right. A bar that does not is usually two voices sharing a
+staff, so they are separated by stem direction and accumulated independently;
+failing that the bar is spaced by where the engraver put things, which is never
+exact but never nonsense. The app reports the split rather than hiding it.
 
 Rendering is [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org/); the
 letter guide is drawn into OSMD's SVG using positions read from its graphic
@@ -162,9 +217,27 @@ the MusicXML directly, which keeps timing under our control.
 npm run typecheck
 npm run smoke                       # parser, against the bundled example
 npm run midi                        # MIDI import, against a built-in fixture
+npm run pdf -- "some/score.pdf"     # PDF import, against a real PDF
 npm run build && npm run preview    # then, in another shell:
 npm run verify                      # needs Microsoft Edge or Chrome installed
+npm run verify -- http://localhost:4173/ --pdf "some/score.pdf"
 ```
+
+`pdf` has no bundled fixture on purpose: writing a PDF by hand the way
+`midi-smoke` writes a MIDI file would mean writing an engraver first, and a
+fixture drawn by this project would only prove it can read its own output. So it
+runs against a real PDF, asserts what must hold of any engraving — staves in
+pairs, bars that divide, right hand above left, every pitch on a keyboard — and
+prints the number that actually matters:
+
+```
+RHYTHM   bars that add up exactly: 29/81  (35.8%)
+         sum/expected p10 0.79  median 1.00  p90 1.17
+```
+
+The distribution is the debugging tool. Consistently over means note values are
+read too long (beams being missed); consistently under means notes are missed
+outright; a median that is not 1.00 usually means the time signature is wrong.
 
 `midi` writes a Standard MIDI File byte by byte, imports it, and asserts the
 score that comes out: the fixture is hand-written rather than sampled so the
@@ -204,9 +277,36 @@ It leaves the fixture and the generated notation in `scripts/out/`.
 - a **`.mid` dropped into the running app** comes out engraved by OSMD, with
   every printed letter matching the pitch the parser read — the same
   cross-check as the first phase, run against notation this app generated
-  rather than notation it was handed.
+  rather than notation it was handed,
+- a **`.pdf`**, when one is supplied, opens without error, is engraved, gets its
+  letters, and reports what it could verify. This phase is the only thing that
+  exercises the pdf.js worker, which Node never touches.
 
 It writes screenshots to `scripts/out/`.
+
+## Known limitations of PDF import
+
+**Pitch is reliable. Rhythm is partial, and the app says so** — the banner after
+an import reports how many bars were verified against their own time signature.
+On the 7-page score this was built against: 81 bars, 1886 notes, clefs, key,
+metre (including a 12/8) and tempo all read correctly, hands correctly
+separated, every pitch on the keyboard — and **36% of bars verified exactly**,
+the rest spaced by position. Expect the letter guide and the keyboard view to be
+trustworthy on a PDF, and playback to drift in the bars that could not be
+verified.
+
+- **Only vector PDFs exported from notation software.** A scan or a photo needs
+  real optical recognition, which this is not; it will report that it cannot
+  find any staves rather than guessing.
+- **Two voices on one staff are merged.** They are separated by stem direction
+  only when that makes the bar add up; otherwise they are flattened into one
+  line, and inner voices lose their independence.
+- **Ties are drawn but not followed.** A tied note is re-struck rather than held,
+  because a tie is a curve on the page and telling it from a slur means matching
+  its ends to noteheads of the same pitch.
+- **Grace notes, tuplets and repeats are not read.** Tuplet brackets in
+  particular will not add up, so those bars fall back to positional spacing.
+- Nothing decorative is read: dynamics, articulations, pedal, fingering, 8va.
 
 ## Known limitations of MIDI import
 

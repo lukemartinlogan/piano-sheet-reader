@@ -154,7 +154,7 @@ if (path) {
 }
 
 const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-const { xml, doc, fromMidi } = await loadMusicXml(buffer as ArrayBuffer, name);
+const { xml, doc, source } = await loadMusicXml(buffer as ArrayBuffer, name);
 const score = parseScore(doc);
 writeFileSync(`${outDir}${path ? 'imported' : 'fixture'}.musicxml`, xml);
 
@@ -169,7 +169,7 @@ console.log(`pitch range    MIDI ${Math.min(...midis)}..${Math.max(...midis)}`);
 console.log(`written to     scripts/out/${path ? 'imported' : 'fixture'}.musicxml`);
 console.log('');
 
-check('routed as MIDI', fromMidi, fromMidi === true);
+check('routed as MIDI', source, source === 'midi');
 
 if (path) {
   // A real file has no known answer; check only that the result is coherent.

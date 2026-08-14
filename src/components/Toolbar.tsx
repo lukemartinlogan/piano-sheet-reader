@@ -8,8 +8,8 @@ export type ViewMode = 'sheet' | 'keyboard';
 export interface ToolbarProps {
   title: string;
   composer: string;
-  /** Set when the score was transcribed from a MIDI file rather than read as MusicXML. */
-  fromMidi: boolean;
+  /** What the notation was read from, when it was not MusicXML to begin with. */
+  source: 'musicxml' | 'midi' | 'pdf';
   playing: boolean;
   position: number;
   duration: number;
@@ -81,9 +81,12 @@ export function Toolbar(props: ToolbarProps) {
         <div className="score-meta">
           <span className="score-title">{props.title || 'No score loaded'}</span>
           {props.composer && <span className="score-composer">{props.composer}</span>}
-          {props.fromMidi && (
-            <span className="score-source" title="Transcribed from a MIDI file">
-              from MIDI
+          {props.source !== 'musicxml' && (
+            <span
+              className="score-source"
+              title={`Transcribed from a ${props.source === 'pdf' ? 'PDF' : 'MIDI file'}`}
+            >
+              from {props.source === 'pdf' ? 'PDF' : 'MIDI'}
             </span>
           )}
         </div>
@@ -125,7 +128,7 @@ export function Toolbar(props: ToolbarProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xml,.musicxml,.mxl,.mid,.midi"
+            accept=".xml,.musicxml,.mxl,.mid,.midi,.pdf"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0];

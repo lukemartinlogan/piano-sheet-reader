@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreView } from './components/ScoreView';
 import { PianoRoll } from './components/PianoRoll';
 import { Toolbar, type ViewMode } from './components/Toolbar';
-import { loadMusicXml } from './score/loadMusicXml';
+import { loadMusicXml, type ScoreSource } from './score/loadMusicXml';
 import { parseScore } from './score/parseScore';
 import type { ParsedScore } from './score/types';
 import { DEFAULT_GUTTER, type GutterOptions } from './render/letterGutter';
@@ -16,7 +16,7 @@ interface Loaded {
   xml: string;
   score: ParsedScore;
   filename: string;
-  fromMidi: boolean;
+  source: ScoreSource;
 }
 
 export default function App() {
@@ -26,6 +26,8 @@ export default function App() {
 
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** How an import went, when that is worth saying out loud. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -64,12 +66,13 @@ export default function App() {
       setBusy(true);
       setError(null);
       try {
-        const { xml, doc, fromMidi } = await loadMusicXml(data, filename);
+        const { xml, doc, source, notice } = await loadMusicXml(data, filename);
         const score = parseScore(doc);
         player.stop();
         player.load(score.notes, score.totalDuration);
         setMutedStaves([]);
-        setLoaded({ xml, score, filename, fromMidi });
+        setNotice(notice);
+        setLoaded({ xml, score, filename, source });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -200,7 +203,7 @@ export default function App() {
         onView={setView}
         fallSeconds={fallSeconds}
         onFallSeconds={setFallSeconds}
-        fromMidi={loaded?.fromMidi ?? false}
+        source={loaded?.source ?? 'musicxml'}
         follow={follow}
         onFollow={setFollow}
         hideClefs={hideClefs}
@@ -220,6 +223,17 @@ export default function App() {
         <div className="banner banner-error" role="alert">
           {error}
           <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* An import that had to guess says so, rather than passing the guess off
+          as the score the reader handed us. */}
+      {notice && !error && (
+        <div className="banner banner-notice">
+          {notice}
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">
             ×
           </button>
         </div>
@@ -257,7 +271,7 @@ export default function App() {
         </div>
         {busy && view === 'sheet' && <div className="busy">Rendering…</div>}
         {dragging && (
-          <div className="drop-hint">Drop a score (.musicxml, .xml, .mxl) or a MIDI file (.mid)</div>
+          <div className="drop-hint">Drop a score: .musicxml, .xml, .mxl, .mid or .pdf</div>
         )}
       </main>
     </div>

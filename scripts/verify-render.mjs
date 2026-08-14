@@ -495,6 +495,36 @@ record('both hands engraved', `${imported.expectedGroups} measure-staff groups`,
   imported.expectedGroups >= 4);
 await page.screenshot({ path: `${outDir}midi-import.png` });
 
+// ------------------------------------------------------------ pdf import ---
+// Only runs when given a real PDF, since none can be bundled: `npm run verify
+// -- <url> --pdf <file>`. The point is to prove the browser path works end to
+// end — pdf.js worker included, which nothing in Node exercises.
+const pdfFlag = process.argv.indexOf('--pdf');
+if (pdfFlag > 0 && process.argv[pdfFlag + 1]) {
+  const pdfPath = process.argv[pdfFlag + 1];
+  console.log('');
+  console.log('pdf import');
+  await page.setInputFiles('input[type=file]', pdfPath);
+  await page.waitForTimeout(9000);
+
+  const pdfState = await page.evaluate(() => ({
+    badge: document.querySelector('.score-source')?.textContent?.trim() ?? null,
+    banner: document.querySelector('.banner-error')?.textContent ?? null,
+    notice: document.querySelector('.banner-notice')?.textContent ?? null,
+    letters: document.querySelectorAll('.note-letter').length,
+    noteheads: document.querySelectorAll('g.vf-notehead').length,
+    title: document.querySelector('.score-title')?.textContent,
+  }));
+  record('opened without error', pdfState.banner ?? 'no banner', pdfState.banner === null);
+  record('flagged as PDF', pdfState.badge, pdfState.badge === 'from PDF');
+  record('engraved by OSMD', `${pdfState.noteheads} noteheads`, pdfState.noteheads > 200);
+  record('letters drawn', pdfState.letters, pdfState.letters > 200);
+  record('reports what it verified', pdfState.notice ? 'yes' : 'no', Boolean(pdfState.notice));
+  console.log(`      title: ${pdfState.title}`);
+  if (pdfState.notice) console.log(`      ${pdfState.notice.replace(/\s*×$/, '')}`);
+  await page.screenshot({ path: `${outDir}pdf-import.png` });
+}
+
 console.log('');
 console.log('screenshots      scripts/out/{render,with-guide,keyboard,midi-import}.png');
 if (problems.length) {
