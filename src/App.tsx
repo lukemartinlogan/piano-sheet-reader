@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreView } from './components/ScoreView';
 import { PianoRoll } from './components/PianoRoll';
 import { Toolbar, type ViewMode } from './components/Toolbar';
+import { Library } from './components/Library';
 import { loadMusicXml, type ScoreSource } from './score/loadMusicXml';
 import { parseScore } from './score/parseScore';
 import type { ParsedScore } from './score/types';
@@ -9,6 +10,17 @@ import { DEFAULT_GUTTER, type GutterOptions } from './render/letterGutter';
 import { measureAt } from './render/highlight';
 import { Player, listMidiOutputs } from './audio/Player';
 import type { MidiOutputLike } from './audio/PianoSynth';
+import { isNative } from './native/platform';
+import {
+  deleteScore,
+  listScores,
+  readScore,
+  rememberScore,
+  rememberedScore,
+  saveScore,
+  type LibraryEntry,
+} from './native/library';
+import { launchedWithFile, watchOpenedFiles } from './native/openedFiles';
 
 const EXAMPLE_URL = `${import.meta.env.BASE_URL}examples/elden-ring-ost-the-final-battle-tsukasa-saitoh.mxl`;
 
@@ -17,7 +29,12 @@ interface Loaded {
   score: ParsedScore;
   filename: string;
   source: ScoreSource;
+  /** Name in the on-device library, when it has one. */
+  libraryName: string | null;
 }
+
+/** Where a score came from, which decides whether it is filed in the library. */
+type Origin = 'file' | 'library' | 'example';
 
 export default function App() {
   const playerRef = useRef<Player | null>(null);
@@ -48,6 +65,17 @@ export default function App() {
 
   const [transport, setTransport] = useState({ playing: false, position: 0, duration: 0 });
 
+  /** The device library. Empty, and never shown, on the web. */
+  const native = isNative();
+  const [entries, setEntries] = useState<LibraryEntry[]>([]);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const refreshLibrary = useCallback(() => {
+    if (!native) return;
+    void listScores().then(setEntries, () => setEntries([]));
+  }, [native]);
+
   useEffect(() => {
     player.onUpdate = setTransport;
     return () => {
@@ -61,25 +89,58 @@ export default function App() {
     void listMidiOutputs().then(setMidiOutputs);
   }, []);
 
+  /**
+   * Imports can overlap — a PDF takes seconds to read, and a file opened from
+   * Mail can land in the middle of one. Only the newest request is allowed to
+   * put a score on screen; an older one that finishes late is dropped.
+   */
+  const openSeq = useRef(0);
+
   const openBuffer = useCallback(
-    async (data: ArrayBuffer, filename: string) => {
+    async (data: ArrayBuffer, filename: string, origin: Origin, libraryName?: string) => {
+      const seq = ++openSeq.current;
       setBusy(true);
       setError(null);
       try {
         const { xml, doc, source, notice } = await loadMusicXml(data, filename);
         const score = parseScore(doc);
+        if (seq !== openSeq.current) return;
+
+        // Filed only once it has parsed: a file the app cannot read is not a
+        // score, and putting it in the library would make it a permanent one.
+        let name = libraryName ?? null;
+        let message = notice;
+        if (native && origin === 'file') {
+          try {
+            name = await saveScore(filename, data, {
+              title: score.title,
+              composer: score.composer,
+            });
+          } catch (cause) {
+            // Reading it still worked; say so rather than losing the score.
+            const why = cause instanceof Error ? cause.message : String(cause);
+            message = `Opened, but could not be added to the library (${why}).`;
+          }
+        }
+        if (seq !== openSeq.current) return;
+
         player.stop();
         player.load(score.notes, score.totalDuration);
         setMutedStaves([]);
-        setNotice(notice);
-        setLoaded({ xml, score, filename, source });
+        setNotice(message);
+        setLoaded({ xml, score, filename, source, libraryName: name });
+        if (native) {
+          rememberScore(name);
+          refreshLibrary();
+        }
       } catch (cause) {
+        if (seq !== openSeq.current) return;
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
-        setBusy(false);
+        if (seq === openSeq.current) setBusy(false);
       }
     },
-    [player],
+    [player, native, refreshLibrary],
   );
 
   const loadExample = useCallback(async () => {
@@ -87,24 +148,80 @@ export default function App() {
     try {
       const response = await fetch(EXAMPLE_URL);
       if (!response.ok) throw new Error(`Could not fetch the example score (${response.status}).`);
-      await openBuffer(await response.arrayBuffer(), 'example.mxl');
+      await openBuffer(await response.arrayBuffer(), 'example.mxl', 'example');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);
     }
   }, [openBuffer]);
 
-  // Load the bundled example on first run so there is always something on screen.
+  const openFile = useCallback(
+    async (file: File) => {
+      await openBuffer(await file.arrayBuffer(), file.name, 'file');
+    },
+    [openBuffer],
+  );
+
+  const openFromLibrary = useCallback(
+    async (name: string) => {
+      setShowLibrary(false);
+      try {
+        await openBuffer(await readScore(name), name, 'library', name);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [openBuffer],
+  );
+
+  /*
+   * First run.
+   *
+   * On the web that is always the bundled example. In the app it is whatever
+   * was last open, so closing the app between practice sessions comes back to
+   * the piece rather than to the demo — unless a file launched the app, in
+   * which case that file is about to arrive and gets the screen instead.
+   */
   useEffect(() => {
-    void loadExample();
+    void (async () => {
+      if (native) {
+        refreshLibrary();
+        if (await launchedWithFile()) return;
+        const last = rememberedScore();
+        if (last) {
+          try {
+            await openBuffer(await readScore(last), last, 'library', last);
+            return;
+          } catch {
+            // Deleted from the Files app, most likely. Fall through to the example.
+            rememberScore(null);
+          }
+        }
+      }
+      await loadExample();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openFile = useCallback(
-    async (file: File) => {
-      await openBuffer(await file.arrayBuffer(), file.name);
-    },
+  // Files handed over by iOS: "Open in Sheet Reader" from Files, Mail, AirDrop.
+  useEffect(
+    () => watchOpenedFiles(({ data, filename }) => void openBuffer(data, filename, 'file')),
     [openBuffer],
+  );
+
+  const removeFromLibrary = useCallback(
+    async (name: string) => {
+      try {
+        await deleteScore(name);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+      refreshLibrary();
+      setLoaded((previous) =>
+        previous && previous.libraryName === name ? { ...previous, libraryName: null } : previous,
+      );
+    },
+    [refreshLibrary],
   );
 
   const currentMeasure = useMemo(() => {
@@ -214,9 +331,28 @@ export default function App() {
         midiOutputs={midiOutputs}
         midiOutputId={midiOutputId}
         onMidiOutput={handleMidiOutput}
-        onOpenFile={(file) => void openFile(file)}
+        onPickFile={() => fileInputRef.current?.click()}
         onLoadExample={() => void loadExample()}
+        onLibrary={native ? () => setShowLibrary(true) : null}
         disabled={!loaded}
+      />
+
+      {/*
+        One picker for the whole app, so the toolbar and the library open the
+        same one. In the shell it carries no `accept`: iOS filters the document
+        picker by type, and a type it does not recognise greys out every score
+        on the device. The format is read from the file's bytes anyway.
+      */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={native ? undefined : '.xml,.musicxml,.mxl,.mid,.midi,.pdf'}
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void openFile(file);
+          event.target.value = '';
+        }}
       />
 
       {error && (
@@ -251,6 +387,7 @@ export default function App() {
             score={loaded?.score ?? null}
             gutter={gutter}
             zoom={zoom}
+            onZoom={setZoom}
             currentMeasure={currentMeasure}
             follow={follow}
             hideClefs={hideClefs}
@@ -274,6 +411,21 @@ export default function App() {
           <div className="drop-hint">Drop a score: .musicxml, .xml, .mxl, .mid or .pdf</div>
         )}
       </main>
+
+      {showLibrary && (
+        <Library
+          entries={entries}
+          currentName={loaded?.libraryName ?? null}
+          onOpen={(name) => void openFromLibrary(name)}
+          onDelete={(name) => void removeFromLibrary(name)}
+          onPickFile={() => fileInputRef.current?.click()}
+          onLoadExample={() => {
+            setShowLibrary(false);
+            void loadExample();
+          }}
+          onClose={() => setShowLibrary(false)}
+        />
+      )}
     </div>
   );
 }

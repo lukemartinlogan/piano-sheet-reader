@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { GutterMode, GutterOptions } from '../render/letterGutter';
 import type { MidiOutputLike } from '../audio/PianoSynth';
 
@@ -38,8 +38,11 @@ export interface ToolbarProps {
   midiOutputs: MidiOutputLike[];
   midiOutputId: string;
   onMidiOutput: (id: string) => void;
-  onOpenFile: (file: File) => void;
+  /** Opens the system file picker; the input itself lives in App. */
+  onPickFile: () => void;
   onLoadExample: () => void;
+  /** The on-device library, which only the app shell has. */
+  onLibrary: (() => void) | null;
   disabled: boolean;
 }
 
@@ -57,7 +60,6 @@ const staffLabel = (index: number, count: number): string => {
 
 export function Toolbar(props: ToolbarProps) {
   const [showSettings, setShowSettings] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /**
    * Size is applied on release, not while dragging.
@@ -111,12 +113,22 @@ export function Toolbar(props: ToolbarProps) {
               Keyboard
             </button>
           </div>
-          <button type="button" onClick={() => fileInputRef.current?.click()}>
-            Open file
-          </button>
-          <button type="button" onClick={props.onLoadExample}>
-            Example
-          </button>
+          {/* In the app the library is the way in, and the picker lives inside
+              it; on the web there is no library and the picker is the way in. */}
+          {props.onLibrary ? (
+            <button type="button" onClick={props.onLibrary}>
+              Library
+            </button>
+          ) : (
+            <>
+              <button type="button" onClick={props.onPickFile}>
+                Open file
+              </button>
+              <button type="button" onClick={props.onLoadExample}>
+                Example
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={showSettings ? 'active' : ''}
@@ -125,17 +137,6 @@ export function Toolbar(props: ToolbarProps) {
           >
             Settings
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xml,.musicxml,.mxl,.mid,.midi,.pdf"
-            hidden
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) props.onOpenFile(file);
-              event.target.value = '';
-            }}
-          />
         </div>
       </div>
 

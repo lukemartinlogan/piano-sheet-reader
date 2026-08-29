@@ -6,6 +6,10 @@ scripts/out/
 .DS_Store
 .vite/
 
-# Capacitor native projects (added when the mobile shells are generated)
+# The iOS project is committed: the Info.plist document types, the icon, the
+# launch screen and the SPM manifest are all hand-set, and `cap add ios` would
+# regenerate them as the template's defaults. Its own .gitignore keeps the
+# generated parts out — the copied web assets, DerivedData, build output.
+
+# Android has no shell yet; nothing here to keep.
 /android/
-/ios/

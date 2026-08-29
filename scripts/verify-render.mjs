@@ -20,6 +20,23 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
 
 const problems = [];
+/**
+ * Everything the app asks for that is not served by the app itself.
+ *
+ * The iPad build has to work in airplane mode, and a single font or CDN script
+ * that only ever loads because the dev machine happens to be online would not
+ * show up in any other check here — it would show up as a blank screen on a
+ * plane. So every request is watched, and the app's own origin is the only
+ * address allowed.
+ */
+const origin = new URL(url).origin;
+const offsite = new Set();
+page.on('request', (request) => {
+  const target = request.url();
+  if (target.startsWith('data:') || target.startsWith('blob:')) return;
+  if (target.startsWith(origin)) return;
+  offsite.add(target);
+});
 page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
 page.on('response', (response) => {
   if (response.status() >= 400 && !response.url().endsWith('favicon.ico')) {
@@ -524,6 +541,14 @@ if (pdfFlag > 0 && process.argv[pdfFlag + 1]) {
   if (pdfState.notice) console.log(`      ${pdfState.notice.replace(/\s*×$/, '')}`);
   await page.screenshot({ path: `${outDir}pdf-import.png` });
 }
+
+console.log('');
+console.log('offline');
+record(
+  'requests off this origin',
+  offsite.size === 0 ? 'none' : [...offsite].slice(0, 3).join(', '),
+  offsite.size === 0,
+);
 
 console.log('');
 console.log('screenshots      scripts/out/{render,with-guide,keyboard,midi-import}.png');

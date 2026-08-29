@@ -65,11 +65,15 @@ The guide follows clef changes, including a clef change part-way along a line.
 ```bash
 npm install
 npm run dev        # http://localhost:5173
+npm run ios        # build and copy into the iPad shell (see below)
 ```
 
 The bundled example (`public/examples/`) loads on start. Drag any
 `.musicxml`, `.xml`, `.mxl`, `.mid`, or `.pdf` file onto the window to open it.
 The format is read from the file's own bytes, so a mislabelled file still opens.
+
+There is also an **iPad app** — the same bundle, offline, with an on-device
+score library and touch gestures. See [The iPad app](#the-ipad-app).
 
 ## Two views
 
@@ -111,6 +115,8 @@ score on the way back.
 - **External MIDI out** (Settings → Sound → Output) when the browser exposes Web MIDI,
   so playback can drive a hardware or OS synth instead of the built-in one.
 - Space bar toggles play/pause.
+- **An iPad app**, fully offline, with an on-device score library, scores opened
+  from Files/Mail/AirDrop, drag-to-scrub and pinch-to-resize.
 
 ## Layout
 
@@ -125,14 +131,23 @@ src/
   render/    geometry read out of OSMD, letter guide, measure highlight
              keyboard.ts      piano key geometry, shared by roll and keys
   audio/     Web Audio piano voice, MIDI-out sink, transport/scheduler
-  components/  ScoreView (OSMD host), PianoRoll (canvas), Toolbar
+  native/    the iPad shell's half: score library on disk, files iOS hands over
+             platform.ts      the one check everything native hides behind
+  components/  ScoreView (OSMD host), PianoRoll (canvas), Toolbar, Library
 src/render/noteLetters.ts draws the in-notehead letters
+ios/         the Capacitor Xcode project (committed; see The iPad app)
 scripts/
   smoke.ts          parse a score in Node and print/validate the result
   midi-smoke.ts     build a .mid in memory, import it, assert the score
   pdf-smoke.ts      import a real PDF and report how much could be verified
   verify-render.mjs browser check that the guide aligns with the staff
+  make-app-art.mjs  draws the app icon and launch image from the palette
+  fix-spm-paths.mjs repairs Package.swift after a sync run on Windows
 ```
+
+`src/native/` is the only part of the app that knows an iPad exists, and every
+entry point into it is behind `isNative()`. The web build runs the same bundle
+with those paths dead, which is why the render check still covers both.
 
 Both importers produce MusicXML and hand it to the same loader a dropped
 `.musicxml` goes through, so the renderer, the letter guide and the parser stay
@@ -222,6 +237,9 @@ npm run build && npm run preview    # then, in another shell:
 npm run verify                      # needs Microsoft Edge or Chrome installed
 npm run verify -- http://localhost:4173/ --pdf "some/score.pdf"
 ```
+
+`verify` also asserts that the running app makes **no request off its own
+origin**, which is what keeps the offline claim honest.
 
 `pdf` has no bundled fixture on purpose: writing a PDF by hand the way
 `midi-smoke` writes a MIDI file would mean writing an engraver first, and a
@@ -344,17 +362,128 @@ them affect a `.musicxml` file, which carries the answers.
   letters are dropped for that measure while the coloured rows continue, rather
   than shrinking the letters or overlapping the music.
 
-## Mobile (next step)
+## The iPad app
 
-The app is web-first but built to wrap: `base: './'` in `vite.config.ts`, a
-touch-friendly toolbar, safe-area insets, and an offline synth with no network
-calls at runtime. Adding the iOS/Android shells is:
+The same bundle, wrapped in a [Capacitor](https://capacitorjs.com) shell, in
+`ios/`. There is no `server.url` in `capacitor.config.ts` and nothing is fetched
+at runtime: the WebView loads `dist/` out of the app bundle, the engraver, the
+importers, the example score and the synth are all in there, and the app behaves
+identically in airplane mode. That is checked rather than claimed — see
+*Offline* below.
+
+### Building it
+
+The Xcode project is committed, because its document types, icon, launch screen
+and audio-session setup are hand-set and `npx cap add ios` would regenerate them
+as the template's defaults. So there is nothing to scaffold:
 
 ```bash
-npm i -D @capacitor/cli && npm i @capacitor/core
-npx cap init && npx cap add ios && npx cap add android
-npm run build && npx cap sync
+npm install
+npm run ios          # build the web app, copy it into the shell
+npm run ios:open     # open ios/App/App.xcodeproj in Xcode   (macOS only)
 ```
 
-Note that Web MIDI is not available in the iOS WebView, so the built-in synth is
-the only output there.
+Then pick an iPad (or a simulator) and press Run. `npm run ios` is safe to run on
+any platform; opening and building are macOS-only, and Xcode resolves the Swift
+packages on first build, which is the one step that wants a network.
+
+`npm run ios` ends by rewriting the local package paths in the generated
+`CapApp-SPM/Package.swift`. Capacitor writes them with the host separator, so a
+sync run on Windows emits `path: "..\..\node_modules\@capacitor\app"` — wrong
+separator, and `\n` inside a Swift string literal is a newline, so the path does
+not survive as text. `scripts/fix-spm-paths.mjs` puts them back to POSIX, which
+Swift Package Manager wants on every platform.
+
+The app icon and launch image are generated too, from the app's own palette, so
+the mark on the home screen is the same three coloured noteheads the score is
+drawn with:
+
+```bash
+npm run app-art      # needs Edge or Chrome, like npm run verify
+```
+
+### Offline
+
+Nothing in the app talks to the network — no fonts, no CDN, no analytics, no
+sample library. The piano is synthesised, and the only thing ever fetched is the
+bundled example, from the app's own bundle.
+
+`npm run verify` asserts it: every request the running app makes is watched, and
+any URL that is not the app's own origin fails the check. A stylesheet or font
+that only ever loaded because the dev machine happened to be online would not
+show up in any other test here — it would show up as a blank screen on a plane.
+
+### Getting scores in
+
+An iPad has no window to drag a file onto, so the app keeps a **library**: a
+plain `Scores` folder in its own Documents, listed in the toolbar under Library.
+Anything opened is copied there and stays; the app reopens whatever you last had
+on screen, so closing it between practice sessions comes back to the piece
+rather than to the demo. `UIFileSharingEnabled` puts that folder in the Files app
+under *On My iPad → Sheet Reader*, so the library is a real folder you can add
+to, rename in, and back up — not a private database you cannot see.
+
+Scores arrive three ways:
+
+- **Add a score…** in the Library, which is the system document picker. It
+  carries no `accept` filter in the shell on purpose: iOS filters the picker by
+  UTI, and one type it does not recognise greys out every score on the device.
+  The format is read from the file's own bytes anyway.
+- **Open in Sheet Reader** from Files, Mail, Messages or AirDrop. `Info.plist`
+  declares the four document types, and MusicXML — which has no system UTI — is
+  declared as an *imported* type (`com.recordare.musicxml`, and a `.compressed`
+  variant conforming to zip for `.mxl`) so iOS knows what one is without the app
+  claiming to own it. PDF is registered `Alternate`, never `Owner`: this reads
+  engraved PDFs, it is not a PDF viewer, and it should not displace Books.
+- **Drag and drop** from another app in Split View, which arrives as an ordinary
+  HTML drop and goes through the same path the desktop does.
+
+`LSSupportsOpeningDocumentsInPlace` is deliberately **false**. An in-place URL is
+security-scoped and lives outside the sandbox, where the file bridge cannot read
+it without claiming that scope; with it off, iOS drops a readable copy in
+`Documents/Inbox`, which the app files into the library and then deletes. A
+reader that never writes back to your file loses nothing by taking the copy.
+
+A file is filed only once it has *parsed*. A file the app cannot read is not a
+score, and putting it in the library would make it a permanent one.
+
+### Touch
+
+- **Drag the roll to scrub.** The keyboard view is a timeline and there is no
+  wheel, so it is dragged instead. The roll follows the finger — a note under it
+  stays under it — which means dragging down runs time forward, the direction
+  the notes fall. Below the strike line the keys still play.
+- **Pinch to resize the score.** Re-engraving costs seconds on a long piece, so a
+  pinch cannot re-render as it moves any more than the Size slider can: the
+  gesture scales the drawn SVG for feedback and commits the real size once on
+  release, re-engraving at that size rather than leaving a scaled bitmap. The
+  transform's origin is the point between the fingers, so the bar being read
+  stays under them.
+- The page itself never zooms, controls get finger-sized targets on any coarse
+  pointer, and long-press selection is suppressed over the score so grabbing a
+  page does not grab a notehead.
+- Safe-area insets are honoured on all four edges — the home indicator would
+  otherwise sit over the piano keys, which are at the very bottom of the
+  keyboard view and are meant to be tapped.
+
+### Sound
+
+`AppDelegate` sets the audio session category to `.playback`. A WKWebView's Web
+Audio defaults to `ambient`, the category for sounds the system may silence, so
+the piano would be inaudible whenever the iPad is muted. The session is
+categorised but not activated at launch: activating it would stop whatever else
+is playing before the user has asked for a single note.
+
+**Web MIDI does not exist in the iOS WebView**, so Settings → Sound → Output has
+only the built-in piano there. Everything else — both views, both importers, the
+letter guide, playback, per-hand muting — works the same as on the web.
+
+### What has not been checked
+
+Everything above is built and syncs, the web bundle it wraps passes the full
+render check, and the library's save/list/reopen/remove path was exercised
+end-to-end against Capacitor's filesystem. But **the Xcode build and a run on
+real hardware have not happened** — that needs a Mac, and this was developed on
+Windows. Expect the first `Run` to want a signing team selecting, and treat the
+touch gestures and the Files integration as designed-but-unflown until they have
+been used on a device.

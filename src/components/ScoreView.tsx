@@ -10,6 +10,8 @@ export interface ScoreViewProps {
   score: ParsedScore | null;
   gutter: GutterOptions;
   zoom: number;
+  /** Commits a pinch-to-resize, which is the touch equivalent of the Size slider. */
+  onZoom: (zoom: number) => void;
   currentMeasure: number;
   follow: boolean;
   hideClefs: boolean;
@@ -20,11 +22,27 @@ export interface ScoreViewProps {
 /** OSMD's default page margin, in units. We add the gutter on top of it. */
 const BASE_PAGE_LEFT_MARGIN = 5;
 
+/** The Size slider's range, which pinch has to stay inside. */
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 3;
+
+/**
+ * WebKit's pinch events, which is what an iPad reports a two-finger zoom as.
+ * They are not in the DOM lib because no other engine has them; on anything
+ * else these listeners simply never fire.
+ */
+interface GestureEventLike extends Event {
+  scale: number;
+  clientX: number;
+  clientY: number;
+}
+
 export function ScoreView({
   xml,
   score,
   gutter,
   zoom,
+  onZoom,
   currentMeasure,
   follow,
   hideClefs,
@@ -188,9 +206,70 @@ export function ScoreView({
     });
   }, [currentMeasure, follow, renderNonce]);
 
+  /*
+   * Pinch to resize.
+   *
+   * Re-engraving costs seconds on a long score, so a pinch cannot re-render as
+   * it moves any more than the Size slider can — same reason, same answer: the
+   * gesture scales the drawn SVG with a CSS transform for feedback and commits
+   * the real size once on release. The transform's origin is the point between
+   * the fingers, so the bar being read stays under them.
+   */
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const host = hostRef.current;
+    if (!scroller || !host) return;
+
+    let base = 0;
+
+    const onStart = (event: Event) => {
+      const gesture = event as GestureEventLike;
+      event.preventDefault();
+      base = zoomRef.current;
+      const box = host.getBoundingClientRect();
+      host.style.transformOrigin = `${gesture.clientX - box.left}px ${gesture.clientY - box.top}px`;
+    };
+
+    const onChange = (event: Event) => {
+      const gesture = event as GestureEventLike;
+      event.preventDefault();
+      if (!base) return;
+      const wanted = clampZoom(base * gesture.scale);
+      host.style.transform = `scale(${wanted / base})`;
+    };
+
+    const onEnd = (event: Event) => {
+      const gesture = event as GestureEventLike;
+      event.preventDefault();
+      if (!base) return;
+      const wanted = clampZoom(base * gesture.scale);
+      host.style.transform = '';
+      host.style.transformOrigin = '';
+      base = 0;
+      // A pinch that barely moved is a two-finger scroll, not a resize.
+      if (Math.abs(wanted - zoomRef.current) >= 0.05) onZoom(snapZoom(wanted));
+    };
+
+    scroller.addEventListener('gesturestart', onStart);
+    scroller.addEventListener('gesturechange', onChange);
+    scroller.addEventListener('gestureend', onEnd);
+    return () => {
+      scroller.removeEventListener('gesturestart', onStart);
+      scroller.removeEventListener('gesturechange', onChange);
+      scroller.removeEventListener('gestureend', onEnd);
+    };
+  }, [onZoom]);
+
   return (
     <div className="score-scroll" ref={scrollRef}>
       <div className="score-host" ref={hostRef} />
     </div>
   );
 }
+
+const clampZoom = (zoom: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+
+/** A pinch should land on a size the slider can also reach, not between two. */
+const snapZoom = (zoom: number): number => Math.round(zoom * 20) / 20;

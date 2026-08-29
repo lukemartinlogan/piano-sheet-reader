@@ -51,6 +51,8 @@ export function PianoRoll({
   const sizeRef = useRef({ width: 0, height: 0 });
   /** midi -> time (ms) the manual tap should stop being drawn. */
   const tapsRef = useRef(new Map<number, number>());
+  /** The in-flight drag-scrub, when one finger is dragging the roll. */
+  const scrubRef = useRef<{ pointerId: number; lastY: number; secondsPerPixel: number } | null>(null);
 
   // Notes sorted for the window search, plus the pitch span to draw.
   const prepared = useMemo(() => {
@@ -171,7 +173,23 @@ export function PianoRoll({
 
     const layout = keyboardLayout(prepared.low, prepared.high, width);
     const keyboardHeight = keyboardHeightFor(layout, height);
-    if (y < height - keyboardHeight) return;
+    const strike = height - keyboardHeight;
+    if (y < strike) {
+      // Above the keys the roll *is* the timeline, so it is dragged rather than
+      // scrolled — there is no wheel on an iPad. The roll follows the finger:
+      // a note under it stays under it, which means dragging down runs time
+      // forward, since that is the direction the notes fall.
+      scrubRef.current = {
+        pointerId: event.pointerId,
+        lastY: event.clientY,
+        // Feels like grabbing the roll only if a pixel is worth the same amount
+        // of time going down as the notes travel coming up.
+        secondsPerPixel: settingsRef.current.fallSeconds / Math.max(1, strike),
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      player.pause();
+      return;
+    }
 
     // Black keys are short: below their tips, the white key underneath wins.
     const blackDepth = keyboardHeight * 0.62;
@@ -185,10 +203,35 @@ export function PianoRoll({
     tapsRef.current.set(hit.midi, performance.now() + TAP_MS);
   };
 
+  const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    const delta = event.clientY - scrub.lastY;
+    scrub.lastY = event.clientY;
+    player.seek(player.position + delta * scrub.secondsPerPixel);
+  };
+
+  const endScrub = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.pointerId !== event.pointerId) return;
+    scrubRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
     <div className="piano-roll" ref={containerRef}>
-      <canvas ref={canvasRef} onPointerDown={onPointerDown} />
-      {!score && <p className="piano-roll-empty">Open a score to see it fall.</p>}
+      <canvas
+        ref={canvasRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endScrub}
+        onPointerCancel={endScrub}
+      />
+      {!score && (
+        <p className="piano-roll-empty">Open a score to see it fall.</p>
+      )}
     </div>
   );
 }

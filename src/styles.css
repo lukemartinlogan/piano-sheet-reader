@@ -27,12 +27,28 @@ body {
   color: var(--text);
   font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   overscroll-behavior: none;
+  /*
+   * In the iPad shell a long press anywhere pops the text-selection loupe and
+   * the callout menu, which over an SVG score means grabbing a notehead
+   * instead of turning the page. Controls opt back in below.
+   */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /*
+   * The toolbar carries its own top inset. These are the other three: the home
+   * indicator would otherwise sit over the piano keys, which are at the very
+   * bottom of the keyboard view and are meant to be tapped.
+   */
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 /* ---------- toolbar ---------- */
@@ -114,6 +130,32 @@ body {
   z-index: 1;
 }
 
+/* A finger has no hover state and needs a bigger target than a cursor does. */
+@media (pointer: coarse) {
+  button {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+
+  select,
+  input[type='number'] {
+    min-height: 40px;
+  }
+
+  input[type='checkbox'] {
+    width: 20px;
+    height: 20px;
+  }
+
+  input[type='range'] {
+    height: 40px;
+  }
+
+  .settings {
+    gap: 14px;
+  }
+}
+
 button {
   background: var(--panel-2);
   color: var(--text);
@@ -127,6 +169,14 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+/* Removes the 300ms wait WebKit spends deciding whether a tap is a double-tap. */
+button,
+label,
+input,
+select {
+  touch-action: manipulation;
 }
 
 button:disabled {
@@ -403,6 +453,142 @@ input[type='number'] {
 .measure-highlight {
   fill: #ffd54a;
   opacity: 0.22;
+}
+
+
+/* ---------- library (app shell only) ---------- */
+
+.library-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 9, 12, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(24px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+  z-index: 20;
+}
+
+.library {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  width: min(560px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.library-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-head h2 {
+  margin: 0;
+  font-size: 16px;
+  flex: 1 1 auto;
+}
+
+.library-head button {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted);
+  padding: 2px 10px;
+}
+
+.library-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-empty {
+  margin: 0;
+  padding: 22px 16px;
+  color: var(--muted);
+  /* Users read this one; it is the only place the app explains where scores
+     come from, so it is selectable and does not fight the callout suppression. */
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.library-empty code {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.library-list li {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 10px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-list li.current {
+  background: var(--panel-2);
+}
+
+.library-list li.current .library-title {
+  color: var(--accent);
+}
+
+/* The row is the target: a title is a poor thing to aim a finger at. */
+.library-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 12px 8px 12px 16px;
+}
+
+.library-title {
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.library-delete {
+  align-self: center;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.library-delete:hover:not(:disabled) {
+  color: #ffb0b6;
+  border-color: #ffb0b6;
 }
 
 @media (max-width: 640px) {

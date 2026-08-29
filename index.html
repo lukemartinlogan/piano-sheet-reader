@@ -2,7 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- The page never zooms as a page: the score has its own Size control, and a
+         pinch over it is handled by the app so the notation is re-engraved at the
+         new size rather than scaled up as a blurry bitmap. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <!-- Inline so there is nothing to fetch: the app must draw its own icon
+         with no network and no second file, on the web and in the shell alike. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2312141a'/%3E%3Cpath d='M4 9h24M4 16h24M4 23h24' stroke='%23616b80' stroke-width='1.6' stroke-linecap='round'/%3E%3Cellipse cx='16' cy='16' rx='9' ry='7' fill='%234ddbe0'/%3E%3Ctext x='16' y='16' fill='%2312141a' font-family='Helvetica,Arial,sans-serif' font-size='12' font-weight='700' text-anchor='middle' dominant-baseline='central'%3EG%3C/text%3E%3C/svg%3E" />
     <meta name="theme-color" content="#12141a" />
     <title>Sheet Reader</title>
   </head>
