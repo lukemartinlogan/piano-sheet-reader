@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreView } from './components/ScoreView';
 import { PianoRoll } from './components/PianoRoll';
 import { Toolbar, type ViewMode } from './components/Toolbar';
+import { LibraryDialog } from './components/LibraryDialog';
+import { libraryAvailable, uploadToLibrary } from './library';
 import { loadMusicXml, type ScoreSource } from './score/loadMusicXml';
 import { parseScore } from './score/parseScore';
 import type { ParsedScore } from './score/types';
@@ -30,6 +32,7 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
 
   const [gutter, setGutter] = useState<GutterOptions>(DEFAULT_GUTTER);
   const [view, setView] = useState<ViewMode>('sheet');
@@ -107,6 +110,29 @@ export default function App() {
     [openBuffer],
   );
 
+  /**
+   * Opening a local file also copies it to the server library, so a sheet
+   * opened on one device shows up under "Choose Existing" on the others.
+   * The upload is secondary: if it fails (server down) the
+   * sheet is already open locally, so say so quietly rather than erroring.
+   */
+  const openAndShare = useCallback(
+    async (file: File) => {
+      await openFile(file);
+      if (!libraryAvailable()) return;
+      try {
+        await uploadToLibrary(file);
+      } catch (cause) {
+        setNotice(
+          `Opened locally, but could not add it to the server library: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      }
+    },
+    [openFile],
+  );
+
   const currentMeasure = useMemo(() => {
     if (!loaded) return -1;
     if (!transport.playing && transport.position <= 0) return -1;
@@ -179,7 +205,7 @@ export default function App() {
         event.preventDefault();
         setDragging(false);
         const file = event.dataTransfer.files?.[0];
-        if (file) void openFile(file);
+        if (file) void openAndShare(file);
       }}
     >
       <Toolbar
@@ -214,7 +240,8 @@ export default function App() {
         midiOutputs={midiOutputs}
         midiOutputId={midiOutputId}
         onMidiOutput={handleMidiOutput}
-        onOpenFile={(file) => void openFile(file)}
+        onOpenFile={(file) => void openAndShare(file)}
+        onChooseExisting={libraryAvailable() ? () => setShowLibrary(true) : undefined}
         onLoadExample={() => void loadExample()}
         disabled={!loaded}
       />
@@ -274,6 +301,13 @@ export default function App() {
           <div className="drop-hint">Drop a score: .musicxml, .xml, .mxl, .mid or .pdf</div>
         )}
       </main>
+      {showLibrary && (
+        <LibraryDialog
+          onClose={() => setShowLibrary(false)}
+          // Already on the server — open it without uploading it back.
+          onOpen={(file) => void openFile(file)}
+        />
+      )}
     </div>
   );
 }

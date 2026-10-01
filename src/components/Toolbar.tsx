@@ -39,6 +39,8 @@ export interface ToolbarProps {
   midiOutputId: string;
   onMidiOutput: (id: string) => void;
   onOpenFile: (file: File) => void;
+  /** Open the server-side sheet library. Absent when there is no server. */
+  onChooseExisting?: () => void;
   onLoadExample: () => void;
   disabled: boolean;
 }
@@ -114,6 +116,11 @@ export function Toolbar(props: ToolbarProps) {
           <button type="button" onClick={() => fileInputRef.current?.click()}>
             Open file
           </button>
+          {props.onChooseExisting && (
+            <button type="button" onClick={props.onChooseExisting}>
+              Choose Existing
+            </button>
+          )}
           <button type="button" onClick={props.onLoadExample}>
             Example
           </button>
