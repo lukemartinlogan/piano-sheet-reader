@@ -70,9 +70,16 @@ export function usePdfjs(lib: PdfjsLike): void {
 
 async function library(): Promise<PdfjsLike> {
   if (injected) return injected;
-  const pdfjs = await import('pdfjs-dist');
+  // The legacy build, not the default one. pdf.js 6's modern build calls
+  // `Map.prototype.getOrInsertComputed`, a TC39 proposal method that no
+  // shipping browser implements yet (checked Chrome 143), so opening any PDF
+  // died with "this._intentStates.getOrInsertComputed is not a function". The
+  // legacy build carries the core-js polyfill for it. Revisit once the method
+  // is widely available.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   // The worker is bundled as an asset; without it pdf.js refuses to start.
-  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+  // It must come from the same build as the library above.
+  const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   return pdfjs as unknown as PdfjsLike;
 }
